@@ -1,10 +1,48 @@
 <!DOCTYPE html>
-<html>
+<html lang="ko">
 <head>
-    <title>Job Scraper Challenge</title>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Job Scraper</title>
+  <style>body{font-family:Arial,Helvetica,sans-serif;margin:20px}</style>
 </head>
 <body>
-    <h1>Job Scraper Frontend</h1>
-    <p>Flask 프로젝트 제출용 GitHub Pages입니다.</p>
+  <header>
+    <h1>Job Scraper</h1>
+    <form action="/search" method="get">
+      <input type="text" name="keyword" placeholder="python, javascript, java ..." value="{{ keyword or '' }}" required>
+      <button type="submit">Search</button>
+    </form>
+  </header>
+
+  <main>
+    {% if error %}
+      <p style="color:orange">{{ error }}</p>
+    {% endif %}
+
+    {% if keyword and jobs is defined %}
+      {% if jobs %}
+        <p>{{ jobs|length }} results for "{{ keyword }}"</p>
+        <table border="1" cellpadding="6" cellspacing="0">
+          <thead>
+            <tr><th>Title</th><th>Company</th><th>Source</th><th>Link</th></tr>
+          </thead>
+          <tbody>
+            {% for job in jobs %}
+            <tr>
+              <td>{{ job.title }}</td>
+              <td>{{ job.company }}</td>
+              <td>{{ job.source }}</td>
+              <td><a href="{{ job.link }}" target="_blank">Apply</a></td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      {% else %}
+        <p>No results for "{{ keyword }}".</p>
+      {% endif %}
+    {% endif %}
+  </main>
 </body>
 </html>
+      {% set source_jobs = jobs | selectattr("source", "equalto", source) | list %}
