@@ -2,7 +2,7 @@ from flask import Flask, render_template, request
 import requests
 from bs4 import BeautifulSoup
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates")
 
 HEADERS = {
       'User-Agent':
