@@ -39,6 +39,10 @@
       color: orange;
     }
 
+    #message.loading {
+      color: #666;
+    }
+
     table {
       margin-top: 12px;
       border-collapse: collapse;
@@ -46,7 +50,10 @@
 
     th,
     td {
+      border: 1px solid #000;
+      padding: 6px;
       vertical-align: top;
+      text-align: left;
     }
 
     .results-wrap {
@@ -71,7 +78,7 @@
   </header>
 
   <main>
-    <p id="message"></p>
+    <p id="message" aria-live="polite"></p>
     <div id="results" class="results-wrap"></div>
   </main>
 
@@ -89,6 +96,34 @@
         "\"": "&quot;",
         "'": "&#039;"
       }[char]));
+    }
+
+    function cleanText(value) {
+      return String(value || "").replace(/\s+/g, " ").trim();
+    }
+
+    function showMessage(text, className = "") {
+      message.textContent = text;
+      message.className = className;
+    }
+
+    function buildSearchUrl(keyword) {
+      const url = new URL("search", window.location.href);
+      url.searchParams.set("keyword", keyword);
+      url.searchParams.set("format", "json");
+      return url.toString();
+    }
+
+    function absoluteUrl(href, baseUrl) {
+      if (!href) {
+        return baseUrl;
+      }
+
+      try {
+        return new URL(href, baseUrl).href;
+      } catch (error) {
+        return href;
+      }
     }
 
     function renderTable(jobs) {
@@ -117,60 +152,348 @@
       return table;
     }
 
-    function showResults(data, keyword) {
+    function renderJobs(data, keyword) {
       results.innerHTML = "";
-      message.className = "";
 
       const jobs = Array.isArray(data.jobs) ? data.jobs : [];
-      const finalKeyword = data.keyword || keyword;
+      const finalKeyword = cleanText(data.keyword || keyword);
+
+      if (jobs.length > 0) {
+        showMessage(`${jobs.length} results for "${finalKeyword}"`);
+        results.appendChild(renderTable(jobs));
+        return;
+      }
 
       if (data.error) {
-        message.textContent = data.error;
-        message.className = "error";
+        showMessage(data.error, "error");
         return;
       }
 
-      if (!jobs.length) {
-        message.textContent = `No results for "${finalKeyword}".`;
-        return;
+      showMessage(`No results for "${finalKeyword}".`, "error");
+    }
+
+    async function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+      const controller = new AbortController();
+      const timeoutId = window.setTimeout(() => controller.abort(), timeoutMs);
+
+      try {
+        const response = await fetch(url, {
+          cache: "no-store",
+          ...options,
+          signal: controller.signal
+        });
+        return response;
+      } finally {
+        clearTimeout(timeoutId);
+      }
+    }
+
+    async function fetchHtml(url) {
+      const attempts = [
+        {
+          name: "allorigins-raw",
+          build: (targetUrl) =>
+            `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`,
+          parse: async (response) => response.text()
+        },
+        {
+          name: "allorigins-get",
+          build: (targetUrl) =>
+            `https://api.allorigins.win/get?url=${encodeURIComponent(targetUrl)}`,
+          parse: async (response) => {
+            const data = await response.json();
+            return data.contents || "";
+          }
+        },
+        {
+          name: "codetabs",
+          build: (targetUrl) =>
+            `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(targetUrl)}`,
+          parse: async (response) => response.text()
+        },
+        {
+          name: "corsproxy",
+          build: (targetUrl) =>
+            `https://corsproxy.io/?${encodeURIComponent(targetUrl)}`,
+          parse: async (response) => response.text()
+        }
+      ];
+
+      const requests = attempts.map(async (attempt) => {
+        const response = await fetchWithTimeout(attempt.build(url), {
+          headers: {
+            Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`${attempt.name} returned HTTP ${response.status}`);
+        }
+
+        const text = await attempt.parse(response);
+        if (!cleanText(text)) {
+          throw new Error(`${attempt.name} returned empty content`);
+        }
+
+        return text;
+      });
+
+      try {
+        return await Promise.any(requests);
+      } catch (error) {
+        if (error && Array.isArray(error.errors) && error.errors.length > 0) {
+          throw error.errors[0];
+        }
+
+        throw error || new Error("Unable to fetch page");
+      }
+    }
+
+    function parseDocument(html) {
+      return new DOMParser().parseFromString(html, "text/html");
+    }
+
+    function dedupeJobs(jobs) {
+      const seen = new Set();
+      return jobs.filter((job) => {
+        const key = [
+          cleanText(job.title).toLowerCase(),
+          cleanText(job.company).toLowerCase(),
+          cleanText(job.source).toLowerCase(),
+          cleanText(job.link).toLowerCase()
+        ].join("|");
+
+        if (seen.has(key)) {
+          return false;
+        }
+
+        seen.add(key);
+        return true;
+      });
+    }
+
+    function pickText(root, selectors, title = "") {
+      for (const selector of selectors) {
+        const nodes = Array.from(root.querySelectorAll(selector));
+        for (const node of nodes) {
+          const text = cleanText(node.textContent);
+          if (!text) {
+            continue;
+          }
+
+          if (title && text === title) {
+            continue;
+          }
+
+          if (/^apply$/i.test(text)) {
+            continue;
+          }
+
+          return text;
+        }
       }
 
-      message.textContent = `${jobs.length} results for "${finalKeyword}"`;
-      results.appendChild(renderTable(jobs));
+      return "";
+    }
+
+    function extractLink(root, baseUrl) {
+      const anchor = root.querySelector("a[href]");
+      if (!anchor) {
+        return baseUrl;
+      }
+
+      return absoluteUrl(anchor.getAttribute("href"), baseUrl);
+    }
+
+    async function scrapeBerlinStartup(term) {
+      const url = `https://berlinstartupjobs.com/skill-areas/${encodeURIComponent(term)}/`;
+      const html = await fetchHtml(url);
+      const doc = parseDocument(html);
+      const items = Array.from(doc.querySelectorAll("li")).filter((item) => {
+        const className = cleanText(item.className).toLowerCase();
+        return className.includes("bjs-jlid") || Boolean(item.querySelector("h4"));
+      });
+
+      return items
+        .map((item) => {
+          const title = pickText(item, ["h4", "a"]);
+          if (!title) {
+            return null;
+          }
+
+          const company = pickText(
+            item,
+            [".bjs-jlid__b", ".company", "p", "div", "span"],
+            title
+          );
+
+          return {
+            title,
+            company,
+            link: extractLink(item, url),
+            source: "Berlin Startup Jobs"
+          };
+        })
+        .filter(Boolean);
+    }
+
+    async function scrapeWeb3(term) {
+      const url = `https://web3.career/${encodeURIComponent(term)}-jobs`;
+      const html = await fetchHtml(url);
+      const doc = parseDocument(html);
+      const jobs = [];
+
+      const rows = Array.from(doc.querySelectorAll("tr"));
+      for (const row of rows) {
+        const titleElement =
+          row.querySelector("h2") ||
+          row.querySelector("h3") ||
+          row.querySelector("a[href]");
+        const title = cleanText(titleElement && titleElement.textContent);
+        if (!title) {
+          continue;
+        }
+
+        const company = pickText(
+          row,
+          [".text-muted", "td[class*='company']", ".company"],
+          title
+        );
+
+        jobs.push({
+          title,
+          company,
+          link: extractLink(row, url),
+          source: "Web3 Career"
+        });
+      }
+
+      const cards = Array.from(doc.querySelectorAll("[class*='job'], [class*='card']"));
+      for (const card of cards) {
+        const titleElement =
+          card.querySelector("h2") ||
+          card.querySelector("h3") ||
+          card.querySelector("a[href]");
+        const title = cleanText(titleElement && titleElement.textContent);
+        if (!title) {
+          continue;
+        }
+
+        const company = pickText(card, [".company", ".text-muted"], title);
+        jobs.push({
+          title,
+          company,
+          link: extractLink(card, url),
+          source: "Web3 Career"
+        });
+      }
+
+      return jobs;
+    }
+
+    async function scrapeWeWorkRemotely(term) {
+      const url = `https://weworkremotely.com/remote-jobs/search?utf8=%E2%9C%93&term=${encodeURIComponent(term)}`;
+      const html = await fetchHtml(url);
+      const doc = parseDocument(html);
+      const jobs = [];
+
+      const sections = Array.from(doc.querySelectorAll("section.jobs"));
+      for (const section of sections) {
+        const posts = Array.from(section.querySelectorAll("li"));
+        for (const post of posts) {
+          const className = cleanText(post.className).toLowerCase();
+          if (className.includes("view-all")) {
+            continue;
+          }
+
+          const title = pickText(post, [".title", "a"]);
+          if (!title) {
+            continue;
+          }
+
+          const company = pickText(post, [".company"], title);
+          jobs.push({
+            title,
+            company,
+            link: extractLink(post, "https://weworkremotely.com"),
+            source: "We Work Remotely"
+          });
+        }
+      }
+
+      return jobs;
+    }
+
+    async function searchViaProxy(keyword) {
+      const term = cleanText(keyword).toLowerCase();
+      const scrapers = [scrapeBerlinStartup, scrapeWeb3, scrapeWeWorkRemotely];
+      const settled = await Promise.allSettled(scrapers.map((scraper) => scraper(term)));
+      const jobs = settled.flatMap((result) =>
+        result.status === "fulfilled" ? result.value : []
+      );
+      const uniqueJobs = dedupeJobs(jobs);
+
+      if (uniqueJobs.length > 0) {
+        return {
+          keyword: cleanText(keyword),
+          jobs: uniqueJobs,
+          error: null
+        };
+      }
+
+      return {
+        keyword: cleanText(keyword),
+        jobs: [],
+        error: settled.every((result) => result.status === "rejected")
+          ? "Unable to load live results right now."
+          : `No results for "${cleanText(keyword)}".`
+      };
+    }
+
+    async function searchLocal(keyword) {
+      const response = await fetch(buildSearchUrl(keyword), {
+        headers: {
+          Accept: "application/json"
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Search request failed: ${response.status}`);
+      }
+
+      return response.json();
+    }
+
+    async function performSearch(keyword) {
+      try {
+        return await searchLocal(keyword);
+      } catch (error) {
+        return searchViaProxy(keyword);
+      }
     }
 
     async function runSearch(keyword) {
-      const response = await fetch(
-        `/search?keyword=${encodeURIComponent(keyword)}&format=json`,
-        { headers: { Accept: "application/json" } }
-      );
-      if (!response.ok) {
-        throw new Error("Search request failed");
-      }
-      return response.json();
+      showMessage("Loading...", "loading");
+      results.innerHTML = "";
+      const data = await performSearch(keyword);
+      renderJobs(data, keyword);
     }
 
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const keyword = keywordInput.value.trim();
+      const keyword = cleanText(keywordInput.value);
       if (!keyword) return;
 
       history.replaceState(null, "", `?keyword=${encodeURIComponent(keyword)}`);
-      message.className = "";
-      message.textContent = "Loading...";
-      results.innerHTML = "";
 
       try {
-        const data = await runSearch(keyword);
-        showResults(data, keyword);
+        await runSearch(keyword);
       } catch (error) {
-        results.innerHTML = "";
-        message.textContent = "Search results are available when the Flask app is running.";
-        message.className = "error";
+        showMessage("Unable to load live results right now.", "error");
       }
     });
 
-    const initialKeyword = new URLSearchParams(window.location.search).get("keyword") || "";
+    const initialKeyword = cleanText(new URLSearchParams(window.location.search).get("keyword"));
     if (initialKeyword) {
       keywordInput.value = initialKeyword;
       form.dispatchEvent(new Event("submit", { cancelable: true, bubbles: true }));
