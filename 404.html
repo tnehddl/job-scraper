@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Redirecting - Job Scraper</title>
+  <script>
+    const basePath = "/job-scraper/";
+    const params = new URLSearchParams(window.location.search);
+    const keyword = params.get("keyword") || params.get("term") || "";
+    const target = new URL(basePath, window.location.origin);
+    if (keyword) {
+      target.searchParams.set("keyword", keyword);
+    }
+    window.location.replace(target.toString());
+  </script>
+</head>
+<body>
+  <p>Redirecting to <a href="/job-scraper/">Job Scraper</a>.</p>
+</body>
+</html>

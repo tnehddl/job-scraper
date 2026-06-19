@@ -1,48 +1,290 @@
 <!DOCTYPE html>
-<html lang="ko">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Job Scraper</title>
-  <style>body{font-family:Arial,Helvetica,sans-serif;margin:20px}</style>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7fb;
+      --panel: #ffffff;
+      --ink: #1d2433;
+      --muted: #657084;
+      --line: #d8deea;
+      --blue: #225fd8;
+      --blue-dark: #1647a7;
+      --orange: #b15a00;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Arial, Helvetica, sans-serif;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    .topbar {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .wrap {
+      width: min(100%, 980px);
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .hero {
+      display: grid;
+      gap: 18px;
+      padding-block: 36px 28px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(32px, 6vw, 56px);
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    .subtitle {
+      max-width: 680px;
+      margin: 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.6;
+    }
+
+    .search {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 10px;
+      max-width: 720px;
+      padding: 10px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+    }
+
+    input {
+      width: 100%;
+      min-height: 46px;
+      border: 0;
+      outline: 0;
+      padding: 0 12px;
+      font: inherit;
+      color: var(--ink);
+      background: transparent;
+    }
+
+    button,
+    .button {
+      min-height: 46px;
+      border: 0;
+      border-radius: 6px;
+      padding: 0 18px;
+      font: inherit;
+      font-weight: 700;
+      color: #fff;
+      background: var(--blue);
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      white-space: nowrap;
+    }
+
+    button:hover,
+    .button:hover {
+      background: var(--blue-dark);
+    }
+
+    .sources {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 22px;
+    }
+
+    .source {
+      min-height: 172px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      background: var(--panel);
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .source h2 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .source p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .source a {
+      color: var(--blue);
+      font-weight: 700;
+      text-decoration: none;
+    }
+
+    .source a:hover {
+      text-decoration: underline;
+    }
+
+    .status {
+      margin-top: 20px;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .status strong {
+      color: var(--ink);
+    }
+
+    .note {
+      margin-top: 28px;
+      border-left: 4px solid var(--orange);
+      padding: 12px 16px;
+      background: #fff8ef;
+      color: #583100;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 760px) {
+      .wrap {
+        padding: 20px;
+      }
+
+      .search,
+      .sources {
+        grid-template-columns: 1fr;
+      }
+
+      button,
+      .button {
+        width: 100%;
+      }
+    }
+  </style>
 </head>
 <body>
-  <header>
-    <h1>Job Scraper</h1>
-    <form action="/search" method="get">
-      <input type="text" name="keyword" placeholder="python, javascript, java ..." value="{{ keyword or '' }}" required>
-      <button type="submit">Search</button>
-    </form>
+  <header class="topbar">
+    <div class="wrap hero">
+      <h1>Job Scraper</h1>
+      <p class="subtitle">
+        GitHub Pages hosts this project as a static site. Search a keyword and jump to live job listings from the configured sources.
+      </p>
+      <form class="search" id="searchForm">
+        <input id="keyword" name="keyword" type="search" placeholder="python, javascript, java ..." autocomplete="off" required>
+        <button type="submit" aria-label="Search jobs">Search</button>
+      </form>
+    </div>
   </header>
 
-  <main>
-    {% if error %}
-      <p style="color:orange">{{ error }}</p>
-    {% endif %}
+  <main class="wrap">
+    <p class="status" id="status">
+      Enter a keyword to create direct search links for each job board.
+    </p>
 
-    {% if keyword and jobs is defined %}
-      {% if jobs %}
-        <p>{{ jobs|length }} results for "{{ keyword }}"</p>
-        <table border="1" cellpadding="6" cellspacing="0">
-          <thead>
-            <tr><th>Title</th><th>Company</th><th>Source</th><th>Link</th></tr>
-          </thead>
-          <tbody>
-            {% for job in jobs %}
-            <tr>
-              <td>{{ job.title }}</td>
-              <td>{{ job.company }}</td>
-              <td>{{ job.source }}</td>
-              <td><a href="{{ job.link }}" target="_blank">Apply</a></td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      {% else %}
-        <p>No results for "{{ keyword }}".</p>
-      {% endif %}
-    {% endif %}
+    <section class="sources" aria-label="Job sources">
+      <article class="source">
+        <h2>Berlin Startup Jobs</h2>
+        <p>Startup jobs filtered by skill area.</p>
+        <a id="berlinLink" href="https://berlinstartupjobs.com/" target="_blank" rel="noopener">Open source</a>
+      </article>
+      <article class="source">
+        <h2>Web3 Career</h2>
+        <p>Crypto and Web3 roles by keyword.</p>
+        <a id="web3Link" href="https://web3.career/" target="_blank" rel="noopener">Open source</a>
+      </article>
+      <article class="source">
+        <h2>We Work Remotely</h2>
+        <p>Remote jobs from a broad set of companies.</p>
+        <a id="wwrLink" href="https://weworkremotely.com/" target="_blank" rel="noopener">Open source</a>
+      </article>
+    </section>
+
+    <p class="note">
+      The original Flask scraper still needs a Python server to collect and render scraped results. This page prevents the GitHub Pages 404 and keeps the hosted project usable as a static site.
+    </p>
   </main>
+
+  <script>
+    const form = document.querySelector("#searchForm");
+    const keywordInput = document.querySelector("#keyword");
+    const status = document.querySelector("#status");
+    const links = {
+      berlin: document.querySelector("#berlinLink"),
+      web3: document.querySelector("#web3Link"),
+      wwr: document.querySelector("#wwrLink")
+    };
+
+    function updateLinks(rawKeyword) {
+      const keyword = rawKeyword.trim();
+      if (!keyword) {
+        status.textContent = "Enter a keyword to create direct search links for each job board.";
+        links.berlin.href = "https://berlinstartupjobs.com/";
+        links.web3.href = "https://web3.career/";
+        links.wwr.href = "https://weworkremotely.com/";
+        links.berlin.textContent = "Open source";
+        links.web3.textContent = "Open source";
+        links.wwr.textContent = "Open source";
+        return;
+      }
+
+      const slug = encodeURIComponent(keyword.toLowerCase().replace(/\s+/g, "-"));
+      const query = encodeURIComponent(keyword);
+
+      links.berlin.href = `https://berlinstartupjobs.com/skill-areas/${slug}/`;
+      links.web3.href = `https://web3.career/${slug}-jobs`;
+      links.wwr.href = `https://weworkremotely.com/remote-jobs/search?term=${query}`;
+
+      links.berlin.textContent = `Search "${keyword}"`;
+      links.web3.textContent = `Search "${keyword}"`;
+      links.wwr.textContent = `Search "${keyword}"`;
+      status.innerHTML = `Ready: direct links for <strong>${escapeHtml(keyword)}</strong> are available below.`;
+    }
+
+    function escapeHtml(value) {
+      return value.replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      }[char]));
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      updateLinks(keywordInput.value);
+      document.querySelector(".source a").focus();
+    });
+
+    const initialParams = new URLSearchParams(window.location.search);
+    const initialKeyword = initialParams.get("keyword") || initialParams.get("term") || "";
+    if (initialKeyword) {
+      keywordInput.value = initialKeyword;
+      updateLinks(initialKeyword);
+    }
+  </script>
 </body>
 </html>
-      {% set source_jobs = jobs | selectattr("source", "equalto", source) | list %}
